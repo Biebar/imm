@@ -1,20 +1,23 @@
 From hahn Require Import Hahn.
 From Coq Require Import Arith.
+From promising Require Import Basic Event.
+Require Import Events.
 
 Section MixedBasic.
 
 Notation "a ²" := (a × a) (at level 1, format "a ²").
 
-Definition val_t := nat.
+Definition val_t := value.
+Definition loc_t := nat.
 
 Record MixedEvent := {
-  rvals : nat -> option val_t;
-  wvals : nat -> option val_t;
+  rvals : loc_t -> option val_t;
+  wvals : loc_t -> option val_t;
   scevent : bool;
   index : nat;
 }.
 
-Definition vals_dom (vals: nat -> option val_t) n := match vals n with
+Definition vals_dom (vals: loc_t -> option val_t) n := match vals n with
   | None => False
   | Some _ => True
   end.
@@ -45,6 +48,9 @@ Definition aligned_n n e :=
 Definition aligned e :=
   aligned_n 1 e \/ aligned_n 2 e \/ aligned_n 4 e.
 
+Definition starts_at n ev :=
+  exists size, ev_dom ev ≡₁ range n size.
+
 Definition wf_event e :=
   forall n n',
   rvals_dom e n ->
@@ -59,8 +65,9 @@ Record MExec := {
   tot : MixedEvent -> MixedEvent -> Prop;
 }.
 
-Definition is_read e := wvals_dom e ⊆₁ ∅ \/ rvals_dom e ≡₁ wvals_dom e.
-Definition is_write e := rvals_dom e ⊆₁ ∅ \/ rvals_dom e ≡₁ wvals_dom e.
+Definition is_rmw e := rvals_dom e ≡₁ wvals_dom e.
+Definition is_read e := wvals_dom e ⊆₁ ∅ \/ is_rmw e.
+Definition is_write e := rvals_dom e ⊆₁ ∅ \/ is_rmw e.
 Definition is_sc e := scevent e = true.
 
 Definition writes exec :=

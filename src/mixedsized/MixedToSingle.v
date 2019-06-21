@@ -11,6 +11,34 @@ Section MixedToSingle.
 Definition set_from_list {A} l (x:A) :=
   In x l.
 
+Lemma set_from_list_cons {A} l (x : A) :
+  set_from_list (x::l) ≡₁ (fun y => x=y) ∪₁ (set_from_list l).
+Proof.
+  unfold set_from_list.
+  simpl.
+  split; intros y H.
+  - destruct H.
+    + left. assumption.
+    + right. assumption.
+  - destruct H.
+    + left. assumption.
+    + right. assumption.
+Qed.
+
+Lemma set_from_list_app {A} (l l' : list A) :
+  set_from_list (l++l') ≡₁ (set_from_list l) ∪₁ (set_from_list l').
+Proof.
+  induction l as [|x t].
+  - split; intros x H.
+    + right.
+      assumption.
+    + destruct H; auto. contradiction.
+  - simpl.
+    repeat rewrite set_from_list_cons.
+    rewrite IHt. rewrite set_unionA.
+    reflexivity.
+Qed.
+
 Definition is_finite_set {A} (S:A->Prop) :=
   exists l, S ≡₁ (set_from_list l).
 
@@ -56,8 +84,12 @@ Proof.
         -- assumption.
 Qed.
 
+Definition set_image {A B} (R:A->B->Prop) S y :=
+  exists x, S x /\ R x y.
+
+
 Lemma map {A B} l (R : A -> B -> Prop) :
-  (forall x, is_finite_set (R x)) -> 
+  (forall x, In x l -> is_finite_set (R x)) -> 
   exists l', forall y, In y l' <-> exists x, In x l /\ R x y.
 Proof.
   intro finite.
@@ -67,9 +99,9 @@ Proof.
     split;
     intro H;
     repeat destruct H.
-  - destruct (finite a) as [h' [it'1 it'2]].
-    clear finite.
+  - destruct (finite a) as [h' [it'1 it'2]]; try left; auto.
     destruct IHl as [t' eql'].
+    { intros. apply finite. right. assumption. }
     exists (h'++t').
     intro y.
     rewrite in_app_iff.
@@ -91,8 +123,117 @@ Proof.
         split; assumption.
 Qed.
 
-Fixpoint transform_ev_list l := match l with
-  | h::t => 
+Lemma finite_map {A B} S (R : A -> B -> Prop) :
+  is_finite_set S ->
+  (forall x, S x -> is_finite_set (R x)) ->
+  is_finite_set (set_image R S).
+Proof.
+  intros [l finitel] finiteImage.
+  assert (forall x, In x l -> is_finite_set (R x)). {
+    intros.
+    apply finiteImage.
+    apply (proj2 finitel).
+    apply H.
+  }
+  apply map in H.
+  destruct H as [l' eq].
+  exists l'.
+  split; intros y H.
+  - apply (proj2 (eq y)).
+    destruct H as [x [H1 H2]].
+    exists x. 
+    split;
+    try apply (proj1 finitel);
+    assumption.
+  - apply (proj1 (eq y)) in H.
+    destruct H as [x [H1 H2]].
+    exists x.
+    split;
+    try apply (proj2 finitel);
+    assumption.
+Qed.
+
+Definition mixed2single_event exec threadid mev sev :=
+  IF init exec mev
+  then
+    exists loc ev, 
+      in_dom loc mev /\ sev = InitEvent (BinPos.Pos.of_nat loc) /\
+      EV exec ev /\ ~(init exec ev) /\ starts_at loc ev
+  else IF is_rmw mev
+  then
+    sev = ThreadEvent (threadid mev) (2 * (index mev)) \/ (* rmw events get *)
+    sev = ThreadEvent (threadid mev) (2 * (index mev) + 1) (* to two event *)
+  else
+    sev = ThreadEvent (threadid mev) (2 * (index mev)).
+
+Record event_description := {
+  init : bool;
+  read : bool;
+  write : bool;
+  sc : bool;
+  loc : location;
+  value_r : value;
+  value_w : value;
+  id : nat;
+}.
+
+Record inj_nat_list__nat := {
+  nln_func : list nat -> nat;
+  nln_inj : forall x y, nln_func x = nln_func y -> x = y;
+}.
+Lemma nat_nat_star_bij : inj_nat_list__nat.
+(*
+  f(x1...xn) = Product_{i=1...n} pi^{xi+1}
+  with pi the i-th prime number.
+*)
+Admitted.
+
+Definition vallist2val := nln_func nat_nat_star_bij.
+
+Definition mixed2descr exec mev descr :=
+  let n := BinPos.Pos.to_nat (loc descr) in
+  (MixedBasic.init exec mev <-> init descr = true) /\
+  (is_read mev <-> read descr = true) /\ 
+  (is_write mev <-> write descr = true) /\
+  (is_sc mev <-> sc descr = true) /\
+  (IF MixedBasic.init exec mev then
+    in_dom n mev /\
+    exists mev', EV exec mev' /\ ~(MixedBasic.init exec mev') /\ starts_at n mev'
+   else
+    starts_at n mev) /\
+  True (*todo*).
+
+
+Definition descr_to_mode descr :=
+  match sc descr with
+  | true => Osc
+  | false => Orlx
+  end.
+
+Fixpoint mklabel levdescr sev :=
+  let rec := mklabel in
+  match levdescr with
+  | nil => Afence Opln
+  | descr::tail =>
+    if is_init sev then
+      if init descr then
+        Astore Xpln Orlx (loc descr) (value_w descr)
+      else
+        mklabel tail sev
+    else if Nat.eqb (Nat.div (Events.index sev) 2) (id descr) then
+        if read descr && write descr then
+          if Nat.even (Events.index sev) then
+            Aload true (descr_to_mode descr) (loc descr) (value_r descr)
+          else
+            Astore Xpln (descr_to_mode descr) (loc descr) (value_w descr)
+        else if read descr then
+          Aload true (descr_to_mode descr) (loc descr) (value_r descr)
+        else
+          Astore Xpln (descr_to_mode descr) (loc descr) (value_w descr)
+    else
+        mklabel tail sev
+      
+  end.
 
 Theorem unisized_equivalence :
   forall exec,
@@ -104,81 +245,7 @@ Theorem unisized_equivalence :
     (consistent exec <-> wwmm_consistent exec' mo).
 Proof.
   intros exec wf [l eql] uni.
-
-(*
-Definition nooverlap_exec exec :=
-  EV exec ⊆₁ aligned /\ EV exec × EV exec ∩ overlap ⊆ ∅₂.
-
-Definition event_starts_at l e :=
-  exists size, ev_dom e ≡₁ range l size.
-
-Definition threadid := MixedEvent -> nat.
-
-Definition wf_threadid exec (thid : threadid) :=
-  forall e e', EV exec e -> EV exec e' ->
-    thid e = thid e' <-> sthd exec e e'.
-
-Definition is_finite exec :=
-  exists l, forall e, EV exec e <-> In e l.
-
-Fixpoint list_range n size := match size with
-  | 0 => nil
-  | S size' => n::(list_range (S n) size')
-  end.
-
-Definition or_else {A} (x:A) o := match o with
-  | Some y => y
-  | None => x
-  end.
-
-Definition comp {A} {B} {C} (g:B->C) (f:A->B) x :=
-  g (f x).
-
-Record evtoev_trans exec := {
-  tev : MixedEvent -> actid -> Prop;
-  tlab : actid -> label;
-  tval : list nat -> nat;
-  wf_tev : forall e, EV exec e -> exists f, tev e f;
-  wf_thid : forall e e' f f', EV exec e -> EV exec e' ->
-              tev e f -> tev e' f' ->
-              tid f' = tid f' -> sthd exec e e';
-  wf_index : forall e e' f f', EV exec e -> EV exec e' ->
-              tev e f -> tev e' f' ->
-              index f = index f' -> MixedBasic.index e = MixedBasic.index e';
-  wf_init : forall e f, EV exec e -> tev e f -> is_init f -> init exec e;
-  wf_labr : forall e f, EV exec e -> tev e f -> 
-              is_r tlab f = true -> is_read e;
-  wf_labw : forall e f, EV exec e -> tev e f ->
-              is_w tlab f = true -> is_write e;
-  wf_labsc : forall e f, EV exec e -> tev e f ->
-              is_sc tlab f = true -> MixedBasic.is_sc e;
-  wf_rval : forall e f n size, EV exec e -> tev e f ->
-            is_r tlab f = true ->
-            ev_dom e ≡₁ range n size ->
-            or_else 0 (val tlab f) = tval (map (comp (or_else 0) (rvals e)) (list_range n size));
-  wf_wval : forall e f n size, EV exec e -> tev e f ->
-            is_w tlab f = true ->
-            ev_dom e ≡₁ range n size ->
-            or_else 0 (val tlab f) = tval (map (comp (or_else 0) (wvals e)) (list_range n size));
-  wf_sc : forall e f, EV exec e -> tev e f ->
-            is_sc tlab f <-> MixedBasic.is_sc e;
-}.
-
-Record extoex_trans := {
-  mexec : MExec;
-  exec : execution;
-  trans : evtoev_trans mexec;
-}.
-
-
-
-(*
-  goal : forall exec, aligned_and_no_overlap exec ->
-                      well_formed exec ->
-                      exists exec_single_location,
-                      well_formed exec_single_location /\
-                      coherent exec exec_single_location.
-*)
-*)
+  (*todo*)
+Admitted.
 
 End MixedToSingle.
