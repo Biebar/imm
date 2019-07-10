@@ -65,6 +65,17 @@ Record dead_fixed e := {
     forall e', well_formed e' -> consistent e' -> tot_permutation e e' -> tot e' X Y;
 }.
 
+Lemma dead_general__fixed e :
+  dead_general e -> dead_fixed e.
+Proof.
+  intros [H1 H2 H3].
+  constructor;
+  intros;
+  [apply H1 | apply H2 | apply H3];
+  auto;
+  apply cst_ufxd;
+  assumption.
+Qed.
 
 Lemma totperm_sym e e' : tot_permutation e e' -> tot_permutation e' e.
 Proof.
@@ -110,7 +121,7 @@ Lemma totperm_sw :
 Proof.
   intros e e' totperm.
   unfold sw.
-  rewrite (totperm_rf totperm).
+  rewrite (totperm_rf e e' totperm).
   rewrite totperm_init with e e'; try assumption.
   destruct totperm as [eqE [eqIW [eqsb eqrfb]]].
   replace (sc e) with (sc e').
@@ -202,81 +213,6 @@ Proof.
     split; auto.
 Qed.
 
-Theorem deadness_seqcst e e' :
-  well_formed e -> well_formed e' ->
-  tot_permutation e e' ->
-  data_race_free e ->
-  dead_general e ->
-  hb e ⊆ tot e ->
-  hb e' ⊆ tot e' ->
-  seqcst e' -> seqcst e.
-Proof.
-  intros wf wf' totperm drf dead hbtot hbtot' sce' n.
-  split.
-  {
-    intros X [Y [rfbXY totYX]].
-    apply (proj1 (sce' n) X).
-    exists Y.
-    split. { erewrite <- totperm_rfb; eassumption. }
-    destruct drf_totWovrlp with e e' Y X n as [hbYX | [slYX [scY scX]]];
-    auto.
-    - apply rfb_r_dom with e X; assumption.
-    - apply rfb_w_dom with e Y; assumption.
-    - right. eapply rfb__w; eassumption.
-    - exfalso.
-      destruct (wf_tot e wf) as [[irrefl trans] _].
-      apply (irrefl X).
-      apply trans with Y; try assumption.
-      apply hbtot.
-      constructor. left. right.
-      apply sw_intro; auto.
-      + eapply rfb__rf. eassumption.
-      + apply same_loc_sym. assumption.
-  }
-  intros Z H.
-  unfolder in H.
-  destruct H as [[WZ Zwn] [X [totZX [Y [rfbnYX totYZ]]]]].
-  assert (tot e' Y Z). {
-    destruct drf_totWovrlp with e e' Y Z n as [hbYZ | [slYZ [scY scZ]]];
-    auto.
-    - apply wf_rfb_dom in rfbnYX; try assumption.
-      destruct rfbnYX.
-      assumption.
-    - apply deadg_WscW with e; auto.
-      apply wf_rfb_wr in rfbnYX; try assumption.
-      unfolder in rfbnYX.
-      destruct rfbnYX.
-      assumption.
-      apply cst_ufxd.
-      apply seqcst__cst; auto.
-  }
-  assert(tot e' Z X). {
-    destruct drf_totWovrlp with e e' Z X n as [hbZX | [slZX [scZ scX]]];
-    auto.
-    - apply wf_rfb_dom in rfbnYX; try assumption.
-      destruct rfbnYX.
-      assumption.
-    - apply deadg_WRsc with e; auto.
-      apply wf_rfb_wr in rfbnYX; try assumption.
-      unfolder in rfbnYX.
-      destruct rfbnYX as [_[_ RX]].
-      assumption.
-      apply cst_ufxd.
-      apply seqcst__cst; auto.
-  }
-  unfold seqcst, irreflexive in sce'.
-  apply sce' with n Z.
-  unfolder.
-  split.
-  - split; try assumption.
-    rewrite <- totperm_w with e e';
-    assumption.
-  - repeat (eexists; split; eauto).
-    destruct totperm as [eqE [eqIW [eqsb eqrfb]]].
-    rewrite <- eqrfb.
-    assumption.
-Qed.
-
 Theorem deadness_seqcst_fixed e e' :
   well_formed e -> well_formed e' ->
   tot_permutation e e' ->
@@ -351,17 +287,88 @@ Proof.
 Qed.
 
 
+Theorem deadness_seqcst e e' :
+  well_formed e -> well_formed e' ->
+  tot_permutation e e' ->
+  data_race_free e ->
+  dead_wrt e e' ->
+  hb e ⊆ tot e ->
+  hb e' ⊆ tot e' ->
+  seqcst e' -> seqcst e.
+Proof.
+  intros wf wf' totperm drf dead hbtot hbtot' sce' n.
+  split.
+  {
+    intros X [Y [rfbXY totYX]].
+    apply (proj1 (sce' n) X).
+    exists Y.
+    split. { erewrite <- totperm_rfb; eassumption. }
+    destruct drf_totWovrlp with e e' Y X n as [hbYX | [slYX [scY scX]]];
+    auto.
+    - apply rfb_r_dom with e X; assumption.
+    - apply rfb_w_dom with e Y; assumption.
+    - right. eapply rfb__w; eassumption.
+    - exfalso.
+      destruct (wf_tot e wf) as [[irrefl trans] _].
+      apply (irrefl X).
+      apply trans with Y; try assumption.
+      apply hbtot.
+      constructor. left. right.
+      apply sw_intro; auto.
+      + eapply rfb__rf. eassumption.
+      + apply same_loc_sym. assumption.
+  }
+  intros Z H.
+  unfolder in H.
+  destruct H as [[WZ Zwn] [X [totZX [Y [rfbnYX totYZ]]]]].
+  assert (tot e' Y Z). {
+    destruct drf_totWovrlp with e e' Y Z n as [hbYZ | [slYZ [scY scZ]]];
+    auto.
+    - apply wf_rfb_dom in rfbnYX; try assumption.
+      destruct rfbnYX.
+      assumption.
+    - apply deadwrt_WscW with e; auto.
+      apply wf_rfb_wr in rfbnYX; try assumption.
+      unfolder in rfbnYX.
+      destruct rfbnYX.
+      assumption.
+  }
+  assert(tot e' Z X). {
+    destruct drf_totWovrlp with e e' Z X n as [hbZX | [slZX [scZ scX]]];
+    auto.
+    - apply wf_rfb_dom in rfbnYX; try assumption.
+      destruct rfbnYX.
+      assumption.
+    - apply deadwrt_WRsc with e; auto.
+      apply wf_rfb_wr in rfbnYX; try assumption.
+      unfolder in rfbnYX.
+      destruct rfbnYX as [_[_ RX]].
+      assumption.
+  }
+  unfold seqcst, irreflexive in sce'.
+  apply sce' with n Z.
+  unfolder.
+  split.
+  - split; try assumption.
+    rewrite <- totperm_w with e e';
+    assumption.
+  - repeat (eexists; split; eauto).
+    destruct totperm as [eqE [eqIW [eqsb eqrfb]]].
+    rewrite <- eqrfb.
+    assumption.
+Qed.
+
 Theorem deadness_cst e e' :
   well_formed e -> well_formed e' ->
   tot_permutation e e' ->
-  dead_general e ->
+  dead_wrt e e' ->
+  (hb e) ⊆ (tot e) ->
   consistent_sc_unfixed e' ->
   consistent_sc_unfixed e.
 Proof.
-  intros wf wf' totperm dead cst'.
+  intros wf wf' totperm dead hbtot cst'.
   constructor.
-  - apply deadg_hb_tot.
-    assumption.
+  - assumption.
   - rewrite totperm_rf with _ e', totperm_tearfree with _ e';
     try apply cst_rf_tf;
     assumption.
@@ -383,7 +390,7 @@ Proof.
     destruct H as [[wZ scZ] [X [[totZX slZX] [Y [swYX totYZ]]]]].
     repeat (eexists; split; eauto).
     + split; try assumption.
-      apply deadg_WRsc with e;
+      apply deadwrt_WRsc with e;
       apply sw_r_sc in swYX;
       destruct swYX;
       auto.
@@ -394,7 +401,7 @@ Proof.
         right. split.
         -- rewrite <- totperm_init with e _; assumption.
         -- destruct totperm. rewrite <- H. destruct wZ. assumption.
-      * apply deadg_WscW with e;
+      * apply deadwrt_WscW with e;
         auto.
 Qed.
 
@@ -478,25 +485,32 @@ Proof.
     eapply rfb__r; eassumption.
 Qed.
 
-Axiom classical : forall P, P \/ ~P.
-
 Theorem deadness_valid :
   forall e e',
   well_formed e -> well_formed e' ->
   tot_permutation e e' ->
   dead_wrt e e' ->
+  (hb e) ⊆ (tot e) ->
   ~(consistent_sc_unfixed e) ->
   ~(consistent_sc_unfixed e').
 Proof.
+  intros e e' wf wf' totperm dead hbtot ncst cst'.
+  apply deadness_cst with e e' in cst'; auto.
+Qed.
 
 Theorem deadness_sc :
   forall e e',
-  well_formed e' -> well_formed e' ->
+  well_formed e -> well_formed e' ->
   tot_permutation e e' ->
   dead_wrt e e' ->
   data_race_free e ->
   hb e ⊆ tot e ->
   hb e' ⊆ tot e' ->
-  ~(seqcst e) -> ~(seqcst e).
+  ~(seqcst e) -> ~(seqcst e').
+Proof.
+  intros. intro cst'.
+  apply deadness_seqcst with e e' in cst';
+  auto.
+Qed.
 
 End deadness.
