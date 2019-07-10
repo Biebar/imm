@@ -4,8 +4,16 @@ Require Import MixedBasic.
 
 Section MixedRfb.
 
-Axiom excluded_middle :
-  forall P, P \/ ~P.
+Lemma init_dec exec E : {init exec E} + {~(init exec E)}.
+Proof.
+  destruct (IW exec) as [iw|] eqn:eqinit.
+  - destruct (mev_eq_dec iw E).
+    + subst. left. unfold init. rewrite eqinit. reflexivity.
+    + right. intro. apply n. unfold init in H.
+      rewrite eqinit in H. auto.
+  - right. intro H. unfold init in H. rewrite eqinit in H.
+    contradiction.
+Qed.
 
 Definition rf_func exec :=
   functional (rf exec)⁻¹.
@@ -26,7 +34,7 @@ Lemma uni__tf exec :
   forall E, EV exec E -> tearfree exec E.
 Proof.
   intros cst [[aligned nover] _] E EVE.
-  destruct (excluded_middle (init exec E)).
+  destruct (init_dec exec E).
   - right. assumption.
   - left. split.
     + apply aligned.
@@ -59,7 +67,7 @@ Proof.
     contradiction.
 Qed.
 
-Theorem rf_single_write exec :
+Theorem rf_is_func exec :
   well_formed exec -> consistent exec ->
   unisized exec -> rf_func exec.
 Proof.
@@ -80,7 +88,7 @@ Proof.
       destruct rfWR.
       assumption.
     }
-    destruct (excluded_middle (init exec W)) as [IW | nIW].
+    destruct (init_dec exec W) as [IW | nIW].
     + right. split; assumption.
     + left. split.
       * split; try assumption.
